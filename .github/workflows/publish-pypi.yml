@@ -15,6 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: pypi
+      url: https://pypi.org/p/QPyTexI
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -42,9 +43,6 @@ jobs:
 
       - name: Check the built package
         run: poetry run twine check dist/*
-
-      - name: List built package contents
-        run: tar -tzf dist/*.tar.gz
 
       - name: Publish QPyTexI to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
