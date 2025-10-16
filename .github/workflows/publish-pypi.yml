@@ -1,0 +1,110 @@
+name: Create QPyTexI Release From Tag
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  create-release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: latest
+          virtualenvs-create: false
+          virtualenvs-in-project: false
+
+      - name: Install dependencies
+        run: poetry install --no-interaction
+
+      - name: Build the package
+        run: poetry build
+
+      - name: Check the built package
+        run: poetry run twine check dist/*
+
+      - name: List built package contents
+        run: tar -tzf dist/*.tar.gz
+
+      - name: Publish QPyTexI to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          TAG_NAME="${GITHUB_REF_NAME:-${GITHUB_REF#refs/tags/}}"
+          
+          # Get the previous tag
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD~1 2>/dev/null || echo "")
+          
+          if [ -n "$PREV_TAG" ]; then
+            # Generate changelog from commits between tags
+            CHANGELOG=$(git log --pretty=format:"- %s (%h)" ${PREV_TAG}..HEAD)
+          else
+            # First release - get all commits
+            CHANGELOG=$(git log --pretty=format:"- %s (%h)" --reverse)
+          fi
+          
+          # Create formatted changelog
+          {
+            echo 'CHANGELOG<<EOF'
+            echo "## QPyTexI Release ${TAG_NAME}"
+            echo ""
+            echo "A Python package for generating LaTeX documents with Python integration."
+            echo ""
+            echo "### Changes in this release:"
+            echo "$CHANGELOG"
+            echo EOF
+          } >> "$GITHUB_ENV"
+
+      - name: Get tag message
+        id: tag_message
+        shell: bash
+        run: |
+          TAG_NAME="${GITHUB_REF_NAME:-${GITHUB_REF#refs/tags/}}"
+          if [ "$(git cat-file -t "refs/tags/${TAG_NAME}")" != "tag" ]; then
+            echo "The tag ${TAG_NAME} is lightweight, so there is no annotation message."
+            FALLBACK_MSG="$(git log -1 --format=%B "${GITHUB_SHA}")"
+            {
+              echo 'TAG_MESSAGE<<EOF'
+              echo "$FALLBACK_MSG"
+              echo EOF
+            } >> "$GITHUB_ENV"
+            exit 0
+          fi
+          TAG_MSG="$(git for-each-ref "refs/tags/${TAG_NAME}" --format="%(contents)")"
+          {
+            echo 'TAG_MESSAGE<<EOF'
+            echo "$TAG_MSG"
+            echo EOF
+          }
+
+      - name: Create Release and Upload Assets
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+            dist/*.whl
+            dist/*.tar.gz
+          body: |
+            ${{ env.CHANGELOG }}
